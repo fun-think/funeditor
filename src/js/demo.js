@@ -1,17 +1,11 @@
-/*global require,module*/
-'use strict'
-var CodeMirror = require('codemirror')
-require('codemirror/addon/edit/continuelist.js')
-require('./codemirror/tablist')
-require('codemirror/addon/display/fullscreen.js')
-require('codemirror/mode/markdown/markdown.js')
-require('codemirror/addon/mode/overlay.js')
-require('codemirror/addon/display/placeholder.js')
-require('codemirror/addon/selection/mark-selection.js')
-require('codemirror/mode/gfm/gfm.js')
-require('codemirror/mode/xml/xml.js')
-var CodeMirrorSpellChecker = require('codemirror-spell-checker')
-var marked = require('marked')
+import {EditorState, EditorSelection, SelectionRange} from "@codemirror/state"
+import {basicSetup} from "codemirror"
+import {EditorView, keymap} from "@codemirror/view"
+import {defaultKeymap} from "@codemirror/commands"
+import {markdown} from "@codemirror/lang-markdown"
+import {marked} from "marked"
+import '../css/funeditor.css'
+
 
 // Some variables
 var isMac = /Mac/.test(navigator.platform)
@@ -21,8 +15,8 @@ var bindings = {
   toggleBold: toggleBold,
   toggleItalic: toggleItalic,
   drawLink: drawLink,
-  toggleHeadingSmaller: toggleHeadingSmaller,
-  toggleHeadingBigger: toggleHeadingBigger,
+  toggleHeaderSmaller: toggleHeaderSmaller,
+  toggleHeaderBigger: toggleHeaderBigger,
   drawImage: drawImage,
   toggleBlockquote: toggleBlockquote,
   toggleOrderedList: toggleOrderedList,
@@ -30,9 +24,9 @@ var bindings = {
   toggleCodeBlock: toggleCodeBlock,
   togglePreview: togglePreview,
   toggleStrikethrough: toggleStrikethrough,
-  toggleHeading1: toggleHeading1,
-  toggleHeading2: toggleHeading2,
-  toggleHeading3: toggleHeading3,
+  toggleHeader1: toggleHeader1,
+  toggleHeader2: toggleHeader2,
+  toggleHeader3: toggleHeader3,
   cleanBlock: cleanBlock,
   drawTable: drawTable,
   drawHorizontalRule: drawHorizontalRule,
@@ -46,8 +40,8 @@ var shortcuts = {
   toggleBold: 'Cmd-B',
   toggleItalic: 'Cmd-I',
   drawLink: 'Cmd-K',
-  toggleHeadingSmaller: 'Cmd-H',
-  toggleHeadingBigger: 'Shift-Cmd-H',
+  toggleHeaderSmaller: 'Cmd-H',
+  toggleHeaderBigger: 'Shift-Cmd-H',
   cleanBlock: 'Cmd-E',
   drawImage: 'Cmd-Alt-I',
   toggleBlockquote: "Cmd-'",
@@ -105,7 +99,7 @@ function createIcon(options, enableTooltips, shortcuts) {
   enableTooltips = enableTooltips == undefined ? true : enableTooltips
 
   if (options.title && enableTooltips) {
-    el.title = createTootlip(options.title, options.action, shortcuts)
+    el.title = createTooltip(options.title, options.action, shortcuts)
 
     if (isMac) {
       el.title = el.title.replace('Ctrl', '⌘')
@@ -118,14 +112,14 @@ function createIcon(options, enableTooltips, shortcuts) {
   return el
 }
 
-function createSep() {
+function createSeparator() {
   var el = document.createElement('i')
   el.className = 'separator'
   el.innerHTML = '|'
   return el
 }
 
-function createTootlip(title, action, shortcuts) {
+function createTooltip(title, action, shortcuts) {
   var actionName
   var tooltip = title
 
@@ -178,7 +172,7 @@ function getState(cm, pos) {
     } else if (data === 'tag') {
       ret.image = true
     } else if (data.match(/^header(\-[1-6])?$/)) {
-      ret[data.replace('header', 'heading')] = true
+      ret[data.replace('header', 'header')] = true
     }
   }
   return ret
@@ -191,6 +185,7 @@ var saved_overflow = ''
  * Toggle full screen of the editor.
  */
 function toggleFullScreen(editor) {
+  /*
   // Set fullscreen
   var cm = editor.codemirror
   cm.setOption('fullScreen', !cm.getOption('fullScreen'))
@@ -202,10 +197,10 @@ function toggleFullScreen(editor) {
   } else {
     document.body.style.overflow = saved_overflow
   }
+  */
 
   // Update toolbar class
-  var wrap = cm.getWrapperElement()
-
+  var wrap = editor.view.dom
   if (!/fullscreen/.test(wrap.previousSibling.className)) {
     wrap.previousSibling.className += ' fullscreen'
   } else {
@@ -228,9 +223,10 @@ function toggleFullScreen(editor) {
   }
 
   // Hide side by side if needed
-  var sidebyside = cm.getWrapperElement().nextSibling
-  if (/editor-preview-active-side/.test(sidebyside.className))
+  var sidebyside = wrap.nextSibling
+  if (/editor-preview-active-side/.test(sidebyside.className)) {
     toggleSideBySide(editor)
+  }
 }
 
 /**
@@ -365,7 +361,7 @@ function toggleCodeBlock(editor) {
   var block_start, block_end, lineCount
 
   if (is_code === 'single') {
-    // similar to some SimpleMDE _toggleBlock logic
+    // similar to some FunEditor _toggleBlock logic
     var start = line.text.slice(0, cur_start.ch).replace('`', ''),
       end = line.text.slice(cur_start.ch).replace('`', '')
     cm.replaceRange(
@@ -608,43 +604,43 @@ function toggleBlockquote(editor) {
 }
 
 /**
- * Action for toggling heading size: normal -> h1 -> h2 -> h3 -> h4 -> h5 -> h6 -> normal
+ * Action for toggling header size: normal -> h1 -> h2 -> h3 -> h4 -> h5 -> h6 -> normal
  */
-function toggleHeadingSmaller(editor) {
+function toggleHeaderSmaller(editor) {
   var cm = editor.codemirror
-  _toggleHeading(cm, 'smaller')
+  _toggleHeader(cm, 'smaller')
 }
 
 /**
- * Action for toggling heading size: normal -> h6 -> h5 -> h4 -> h3 -> h2 -> h1 -> normal
+ * Action for toggling header size: normal -> h6 -> h5 -> h4 -> h3 -> h2 -> h1 -> normal
  */
-function toggleHeadingBigger(editor) {
+function toggleHeaderBigger(editor) {
   var cm = editor.codemirror
-  _toggleHeading(cm, 'bigger')
+  _toggleHeader(cm, 'bigger')
 }
 
 /**
- * Action for toggling heading size 1
+ * Action for toggling header size 1
  */
-function toggleHeading1(editor) {
+function toggleHeader1(editor) {
   var cm = editor.codemirror
-  _toggleHeading(cm, undefined, 1)
+  _toggleHeader(cm, undefined, 1)
 }
 
 /**
- * Action for toggling heading size 2
+ * Action for toggling header size 2
  */
-function toggleHeading2(editor) {
+function toggleHeader2(editor) {
   var cm = editor.codemirror
-  _toggleHeading(cm, undefined, 2)
+  _toggleHeader(cm, undefined, 2)
 }
 
 /**
- * Action for toggling heading size 3
+ * Action for toggling header size 3
  */
-function toggleHeading3(editor) {
+function toggleHeader3(editor) {
   var cm = editor.codemirror
-  _toggleHeading(cm, undefined, 3)
+  _toggleHeader(cm, undefined, 3)
 }
 
 /**
@@ -747,8 +743,8 @@ function redo(editor) {
  * Toggle side by side preview
  */
 function toggleSideBySide(editor) {
-  var cm = editor.codemirror
-  var wrapper = cm.getWrapperElement()
+  //var cm = editor.codemirror
+  var wrapper = editor.view.dom
   var preview = wrapper.nextSibling
   var toolbarButton = editor.toolbarElements['side-by-side']
   var useSideBySideListener = false
@@ -770,7 +766,8 @@ function toggleSideBySide(editor) {
     // give some time for the transition from editor.css to fire and the view to slide from right to left,
     // instead of just appearing.
     setTimeout(function () {
-      if (!cm.getOption('fullScreen')) toggleFullScreen(editor)
+      //if (!cm.getOption('fullScreen')) toggleFullScreen(editor)
+      toggleFullScreen(editor)
       preview.className += ' editor-preview-active-side'
     }, 1)
     toolbarButton.className += ' active'
@@ -798,19 +795,20 @@ function toggleSideBySide(editor) {
     preview.innerHTML = editor.options.previewRender(editor.value(), preview)
   }
 
-  if (!cm.sideBySideRenderingFunction) {
-    cm.sideBySideRenderingFunction = sideBySideRenderingFunction
+  if (!editor.sideBySideRenderingFunction) {
+    editor.sideBySideRenderingFunction = sideBySideRenderingFunction
   }
 
   if (useSideBySideListener) {
     preview.innerHTML = editor.options.previewRender(editor.value(), preview)
-    cm.on('update', cm.sideBySideRenderingFunction)
+    EditorView.updateListener.of(function(viewUpd) {
+      if (viewUpd.docChanged) {
+        editor.sideBySideRenderingFunction()
+      }
+    })
   } else {
-    cm.off('update', cm.sideBySideRenderingFunction)
+    //cm.off('update', cm.sideBySideRenderingFunction)
   }
-
-  // Refresh to fix selection being off (#309)
-  cm.refresh()
 }
 
 /**
@@ -892,7 +890,7 @@ function _replaceSelection(cm, active, startEnd, url) {
   cm.focus()
 }
 
-function _toggleHeading(cm, direction, size) {
+function _toggleHeader(cm, direction, size) {
   if (/editor-preview-active/.test(cm.getWrapperElement().lastChild.className))
     return
 
@@ -901,18 +899,18 @@ function _toggleHeading(cm, direction, size) {
   for (var i = startPoint.line; i <= endPoint.line; i++) {
     ;(function (i) {
       var text = cm.getLine(i)
-      var currHeadingLevel = text.search(/[^#]/)
+      var currHeaderLevel = text.search(/[^#]/)
 
       if (direction !== undefined) {
-        if (currHeadingLevel <= 0) {
+        if (currHeaderLevel <= 0) {
           if (direction == 'bigger') {
             text = '###### ' + text
           } else {
             text = '# ' + text
           }
-        } else if (currHeadingLevel == 6 && direction == 'smaller') {
+        } else if (currHeaderLevel == 6 && direction == 'smaller') {
           text = text.substr(7)
-        } else if (currHeadingLevel == 1 && direction == 'bigger') {
+        } else if (currHeaderLevel == 1 && direction == 'bigger') {
           text = text.substr(2)
         } else {
           if (direction == 'bigger') {
@@ -923,28 +921,28 @@ function _toggleHeading(cm, direction, size) {
         }
       } else {
         if (size == 1) {
-          if (currHeadingLevel <= 0) {
+          if (currHeaderLevel <= 0) {
             text = '# ' + text
-          } else if (currHeadingLevel == size) {
-            text = text.substr(currHeadingLevel + 1)
+          } else if (currHeaderLevel == size) {
+            text = text.substr(currHeaderLevel + 1)
           } else {
-            text = '# ' + text.substr(currHeadingLevel + 1)
+            text = '# ' + text.substr(currHeaderLevel + 1)
           }
         } else if (size == 2) {
-          if (currHeadingLevel <= 0) {
+          if (currHeaderLevel <= 0) {
             text = '## ' + text
-          } else if (currHeadingLevel == size) {
-            text = text.substr(currHeadingLevel + 1)
+          } else if (currHeaderLevel == size) {
+            text = text.substr(currHeaderLevel + 1)
           } else {
-            text = '## ' + text.substr(currHeadingLevel + 1)
+            text = '## ' + text.substr(currHeaderLevel + 1)
           }
         } else {
-          if (currHeadingLevel <= 0) {
+          if (currHeaderLevel <= 0) {
             text = '### ' + text
-          } else if (currHeadingLevel == size) {
-            text = text.substr(currHeadingLevel + 1)
+          } else if (currHeaderLevel == size) {
+            text = text.substr(currHeaderLevel + 1)
           } else {
-            text = '### ' + text.substr(currHeadingLevel + 1)
+            text = '### ' + text.substr(currHeaderLevel + 1)
           }
         }
       }
@@ -1009,12 +1007,26 @@ function _toggleLine(cm, name) {
 function _toggleBlock(editor, type, start_chars, end_chars) {
   if (
     /editor-preview-active/.test(
-      editor.codemirror.getWrapperElement().lastChild.className
+      editor.view.dom.parentNode.lastChild.className
     )
-  )
+  ) {
     return
+  }
+  if (type == 'bold') {
+    editor.view.dispatch(editor.view.state.changeByRange(range => ({
+      changes: [{from: range.from, insert: "**"}, {from: range.to, insert: "**"}],
+      range: EditorSelection.range(range.from, range.to + 4)
+    })))
+  } else if (type == 'italic') {
+    text = text.split('*').join('')
+    text = text.split('_').join('')
+  } else if (type == 'strikethrough') {
+    text = text.split('~~').join('')
+  }
 
   end_chars = typeof end_chars === 'undefined' ? start_chars : end_chars
+  
+  return
   var cm = editor.codemirror
   var stat = getState(cm)
 
@@ -1165,59 +1177,60 @@ var toolbarBuiltInButtons = {
   bold: {
     name: 'bold',
     action: toggleBold,
-    className: 'fa fa-bold',
+    className: 'icon-bold',
     title: 'Bold',
     default: true,
   },
   italic: {
     name: 'italic',
     action: toggleItalic,
-    className: 'fa fa-italic',
+    className: 'icon-italic',
     title: 'Italic',
     default: true,
   },
   strikethrough: {
     name: 'strikethrough',
     action: toggleStrikethrough,
-    className: 'fa fa-strikethrough',
+    className: 'icon-strikethrough',
     title: 'Strikethrough',
-  },
-  heading: {
-    name: 'heading',
-    action: toggleHeadingSmaller,
-    className: 'fa fa-header',
-    title: 'Heading',
     default: true,
   },
-  'heading-smaller': {
-    name: 'heading-smaller',
-    action: toggleHeadingSmaller,
-    className: 'fa fa-header fa-header-x fa-header-smaller',
-    title: 'Smaller Heading',
+  header: {
+    name: 'header',
+    action: toggleHeaderSmaller,
+    className: 'icon-header',
+    title: 'Header',
+    default: true,
   },
-  'heading-bigger': {
-    name: 'heading-bigger',
-    action: toggleHeadingBigger,
-    className: 'fa fa-header fa-header-x fa-header-bigger',
-    title: 'Bigger Heading',
+  'header-smaller': {
+    name: 'header-smaller',
+    action: toggleHeaderSmaller,
+    className: 'icon-header-smaller',
+    title: 'Smaller Header',
   },
-  'heading-1': {
-    name: 'heading-1',
-    action: toggleHeading1,
-    className: 'fa fa-header fa-header-x fa-header-1',
-    title: 'Big Heading',
+  'header-bigger': {
+    name: 'header-bigger',
+    action: toggleHeaderBigger,
+    className: 'icon-header-bigger',
+    title: 'Bigger Header',
   },
-  'heading-2': {
-    name: 'heading-2',
-    action: toggleHeading2,
-    className: 'fa fa-header fa-header-x fa-header-2',
-    title: 'Medium Heading',
+  'header-1': {
+    name: 'header-1',
+    action: toggleHeader1,
+    className: 'icon-header-1',
+    title: 'Big Header',
   },
-  'heading-3': {
-    name: 'heading-3',
-    action: toggleHeading3,
-    className: 'fa fa-header fa-header-x fa-header-3',
-    title: 'Small Heading',
+  'header-2': {
+    name: 'header-2',
+    action: toggleHeader2,
+    className: 'icon-header-2',
+    title: 'Medium Header',
+  },
+  'header-3': {
+    name: 'header-3',
+    action: toggleHeader3,
+    className: 'icon-header-3',
+    title: 'Small Header',
   },
   'separator-1': {
     name: 'separator-1',
@@ -1225,35 +1238,37 @@ var toolbarBuiltInButtons = {
   code: {
     name: 'code',
     action: toggleCodeBlock,
-    className: 'fa fa-code',
+    className: 'icon-code',
     title: 'Code',
+    default: true,
   },
   quote: {
     name: 'quote',
     action: toggleBlockquote,
-    className: 'fa fa-quote-left',
+    className: 'icon-quote',
     title: 'Quote',
     default: true,
   },
   'unordered-list': {
     name: 'unordered-list',
     action: toggleUnorderedList,
-    className: 'fa fa-list-ul',
+    className: 'icon-unordered-list',
     title: 'Generic List',
     default: true,
   },
   'ordered-list': {
     name: 'ordered-list',
     action: toggleOrderedList,
-    className: 'fa fa-list-ol',
+    className: 'icon-ordered-list',
     title: 'Numbered List',
     default: true,
   },
   'clean-block': {
     name: 'clean-block',
     action: cleanBlock,
-    className: 'fa fa-eraser fa-clean-block',
+    className: 'icon-clean-block',
     title: 'Clean block',
+    default: true,
   },
   'separator-2': {
     name: 'separator-2',
@@ -1261,28 +1276,30 @@ var toolbarBuiltInButtons = {
   link: {
     name: 'link',
     action: drawLink,
-    className: 'fa fa-link',
+    className: 'icon-link',
     title: 'Create Link',
     default: true,
   },
   image: {
     name: 'image',
     action: drawImage,
-    className: 'fa fa-picture-o',
+    className: 'icon-image',
     title: 'Insert Image',
     default: true,
   },
   table: {
     name: 'table',
     action: drawTable,
-    className: 'fa fa-table',
+    className: 'icon-table',
     title: 'Insert Table',
+    default: true,
   },
   'horizontal-rule': {
     name: 'horizontal-rule',
     action: drawHorizontalRule,
-    className: 'fa fa-minus',
-    title: 'Insert Horizontal Line',
+    className: 'icon-horizontal-rule',
+    title: 'Insert Horizontal Rule',
+    default: true,
   },
   'separator-3': {
     name: 'separator-3',
@@ -1290,21 +1307,21 @@ var toolbarBuiltInButtons = {
   preview: {
     name: 'preview',
     action: togglePreview,
-    className: 'fa fa-eye no-disable',
+    className: 'icon-preview no-disable',
     title: 'Toggle Preview',
     default: true,
   },
   'side-by-side': {
     name: 'side-by-side',
     action: toggleSideBySide,
-    className: 'fa fa-columns no-disable no-mobile',
+    className: 'icon-side-by-side no-disable no-mobile',
     title: 'Toggle Side by Side',
     default: true,
   },
   fullscreen: {
     name: 'fullscreen',
     action: toggleFullScreen,
-    className: 'fa fa-arrows-alt no-disable no-mobile',
+    className: 'icon-fullscreen no-disable no-mobile',
     title: 'Toggle Fullscreen',
     default: true,
   },
@@ -1314,7 +1331,7 @@ var toolbarBuiltInButtons = {
   guide: {
     name: 'guide',
     action: 'https://simplemde.com/markdown-guide',
-    className: 'fa fa-question-circle',
+    className: 'icon-guide',
     title: 'Markdown Guide',
     default: true,
   },
@@ -1324,14 +1341,16 @@ var toolbarBuiltInButtons = {
   undo: {
     name: 'undo',
     action: undo,
-    className: 'fa fa-undo no-disable',
+    className: 'icon-undo no-disable',
     title: 'Undo',
+    default: true,
   },
   redo: {
     name: 'redo',
     action: redo,
-    className: 'fa fa-repeat no-disable',
+    className: 'icon-redo no-disable',
     title: 'Redo',
+    default: true,
   },
 }
 
@@ -1356,54 +1375,17 @@ var blockStyles = {
   italic: '*',
 }
 
-/**
- * Interface of SimpleMDE.
- */
-function SimpleMDE(options) {
-  // Handle options parameter
+function FunEditor(options) {
   options = options || {}
-
-  // Used later to refer to it"s parent
   options.parent = this
-
-  // Check if Font Awesome needs to be auto downloaded
-  var autoDownloadFA = true
-
-  if (options.autoDownloadFontAwesome === false) {
-    autoDownloadFA = false
-  }
-
-  if (options.autoDownloadFontAwesome !== true) {
-    var styleSheets = document.styleSheets
-    for (var i = 0; i < styleSheets.length; i++) {
-      if (!styleSheets[i].href) continue
-
-      if (
-        styleSheets[i].href.indexOf('//maxcdn.bootstrapcdn.com/font-awesome/') >
-        -1
-      ) {
-        autoDownloadFA = false
-      }
-    }
-  }
-
-  if (autoDownloadFA) {
-    var link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href =
-      'https://maxcdn.bootstrapcdn.com/font-awesome/latest/css/font-awesome.min.css'
-    document.getElementsByTagName('head')[0].appendChild(link)
-  }
-
   // Find the textarea to use
   if (options.element) {
     this.element = options.element
   } else if (options.element === null) {
     // This means that the element option was specified, but no element was found
-    console.log('SimpleMDE: Error. No element was found.')
+    console.error('FunEditor Error: No element was found.')
     return
   }
-
   // Handle toolbar
   if (options.toolbar === undefined) {
     // Initialize
@@ -1427,7 +1409,6 @@ function SimpleMDE(options) {
       }
     }
   }
-
   // Handle status bar
   if (!options.hasOwnProperty('status')) {
     options.status = ['autosave', 'lines', 'words', 'cursor']
@@ -1466,324 +1447,38 @@ function SimpleMDE(options) {
     options.autosave != undefined &&
     options.autosave.unique_id != undefined &&
     options.autosave.unique_id != ''
-  )
-    options.autosave.uniqueId = options.autosave.unique_id
-
-  // Update this options
-  this.options = options
-
-  // Auto render
-  this.render()
-
-  // The codemirror component is only available after rendering
-  // so, the setter for the initialValue can only run after
-  // the element has been rendered
-  if (
-    options.initialValue &&
-    (!this.options.autosave || this.options.autosave.foundSavedValue !== true)
   ) {
-    this.value(options.initialValue)
+    options.autosave.uniqueId = options.autosave.unique_id
   }
+  this.options = options
+  this.render()
 }
 
-/**
- * Default markdown render.
- */
-SimpleMDE.prototype.markdown = function (text) {
-  if (marked) {
-    // Initialize
-    var markedOptions = {}
-
-    // Update options
-    if (
-      this.options &&
-      this.options.renderingConfig &&
-      this.options.renderingConfig.singleLineBreaks === false
-    ) {
-      markedOptions.breaks = false
-    } else {
-      markedOptions.breaks = true
-    }
-
-    if (
-      this.options &&
-      this.options.renderingConfig &&
-      this.options.renderingConfig.codeSyntaxHighlighting === true &&
-      window.hljs
-    ) {
-      markedOptions.highlight = function (code) {
-        return window.hljs.highlightAuto(code).value
-      }
-    }
-
-    // Set options
-    marked.setOptions(markedOptions)
-
-    // Return
-    return marked(text)
-  }
-}
-
-/**
- * Render editor to the given element.
- */
-SimpleMDE.prototype.render = function (el) {
+FunEditor.prototype.render = function (el) {
+  console.log('render')
   if (!el) {
-    el = this.element || document.getElementsByTagName('textarea')[0]
+    el = this.element
   }
-
-  if (this._rendered && this._rendered === el) {
-    // Already rendered.
+  if (this.rendered && this.rendered === el) {
     return
   }
-
-  this.element = el
-  var options = this.options
-
-  var self = this
-  var keyMaps = {}
-
-  for (var key in options.shortcuts) {
-    // null stands for "do not bind this command"
-    if (options.shortcuts[key] !== null && bindings[key] !== null) {
-      ;(function (key) {
-        keyMaps[fixShortcut(options.shortcuts[key])] = function () {
-          bindings[key](self)
-        }
-      })(key)
-    }
-  }
-
-  keyMaps['Enter'] = 'newlineAndIndentContinueMarkdownList'
-  keyMaps['Tab'] = 'tabAndIndentMarkdownList'
-  keyMaps['Shift-Tab'] = 'shiftTabAndUnindentMarkdownList'
-  keyMaps['Esc'] = function (cm) {
-    if (cm.getOption('fullScreen')) toggleFullScreen(self)
-  }
-
-  document.addEventListener(
-    'keydown',
-    function (e) {
-      e = e || window.event
-
-      if (e.keyCode == 27) {
-        if (self.codemirror.getOption('fullScreen')) toggleFullScreen(self)
-      }
-    },
-    false
-  )
-
-  var mode, backdrop
-  if (options.spellChecker !== false) {
-    mode = 'spell-checker'
-    backdrop = options.parsingConfig
-    backdrop.name = 'gfm'
-    backdrop.gitHubSpice = false
-
-    CodeMirrorSpellChecker({
-      codeMirrorInstance: CodeMirror,
-    })
-  } else {
-    mode = options.parsingConfig
-    mode.name = 'gfm'
-    mode.gitHubSpice = false
-  }
-
-  this.codemirror = CodeMirror.fromTextArea(el, {
-    mode: mode,
-    backdrop: backdrop,
-    theme: 'paper',
-    tabSize: options.tabSize != undefined ? options.tabSize : 2,
-    indentUnit: options.tabSize != undefined ? options.tabSize : 2,
-    indentWithTabs: options.indentWithTabs === false ? false : true,
-    lineNumbers: false,
-    autofocus: options.autofocus === true ? true : false,
-    extraKeys: keyMaps,
-    lineWrapping: options.lineWrapping === false ? false : true,
-    allowDropFileTypes: ['text/plain'],
-    placeholder: options.placeholder || el.getAttribute('placeholder') || '',
-    styleSelectedText:
-      options.styleSelectedText != undefined ? options.styleSelectedText : true,
+  let state = EditorState.create({
+    doc: "Hello World",
+    extensions: [keymap.of(defaultKeymap)]
+  })
+  
+  this.view = new EditorView({
+    extensions: [basicSetup,markdown()],
+    state: state,
+    parent: el
   })
 
-  if (options.forceSync === true) {
-    var cm = this.codemirror
-    cm.on('change', function () {
-      cm.save()
-    })
-  }
+  this.toolbar = this.createToolbar()
 
-  this.gui = {}
-
-  if (options.toolbar !== false) {
-    this.gui.toolbar = this.createToolbar()
-  }
-  if (options.status !== false) {
-    this.gui.statusbar = this.createStatusbar()
-  }
-  if (options.autosave != undefined && options.autosave.enabled === true) {
-    this.autosave()
-  }
-
-  this.gui.sideBySide = this.createSideBySide()
-
-  this._rendered = this.element
-
-  // Fixes CodeMirror bug (#344)
-  var temp_cm = this.codemirror
-  setTimeout(
-    function () {
-      temp_cm.refresh()
-    }.bind(temp_cm),
-    0
-  )
+  this.sideBySide = this.createSideBySide()
 }
 
-// Safari, in Private Browsing Mode, looks like it supports localStorage but all calls to setItem throw QuotaExceededError. We're going to detect this and set a variable accordingly.
-function isLocalStorageAvailable() {
-  if (typeof localStorage === 'object') {
-    try {
-      localStorage.setItem('smde_localStorage', 1)
-      localStorage.removeItem('smde_localStorage')
-    } catch (e) {
-      return false
-    }
-  } else {
-    return false
-  }
-
-  return true
-}
-
-SimpleMDE.prototype.autosave = function () {
-  if (isLocalStorageAvailable()) {
-    var simplemde = this
-
-    if (
-      this.options.autosave.uniqueId == undefined ||
-      this.options.autosave.uniqueId == ''
-    ) {
-      console.log(
-        'SimpleMDE: You must set a uniqueId to use the autosave feature'
-      )
-      return
-    }
-
-    if (simplemde.element.form != null && simplemde.element.form != undefined) {
-      simplemde.element.form.addEventListener('submit', function () {
-        localStorage.removeItem('smde_' + simplemde.options.autosave.uniqueId)
-      })
-    }
-
-    if (this.options.autosave.loaded !== true) {
-      if (
-        typeof localStorage.getItem('smde_' + this.options.autosave.uniqueId) ==
-          'string' &&
-        localStorage.getItem('smde_' + this.options.autosave.uniqueId) != ''
-      ) {
-        this.codemirror.setValue(
-          localStorage.getItem('smde_' + this.options.autosave.uniqueId)
-        )
-        this.options.autosave.foundSavedValue = true
-      }
-
-      this.options.autosave.loaded = true
-    }
-
-    localStorage.setItem(
-      'smde_' + this.options.autosave.uniqueId,
-      simplemde.value()
-    )
-
-    var el = document.getElementById('autosaved')
-    if (el != null && el != undefined && el != '') {
-      var d = new Date()
-      var hh = d.getHours()
-      var m = d.getMinutes()
-      var dd = 'am'
-      var h = hh
-      if (h >= 12) {
-        h = hh - 12
-        dd = 'pm'
-      }
-      if (h == 0) {
-        h = 12
-      }
-      m = m < 10 ? '0' + m : m
-
-      el.innerHTML = 'Autosaved: ' + h + ':' + m + ' ' + dd
-    }
-
-    this.autosaveTimeoutId = setTimeout(function () {
-      simplemde.autosave()
-    }, this.options.autosave.delay || 10000)
-  } else {
-    console.log('SimpleMDE: localStorage not available, cannot autosave')
-  }
-}
-
-SimpleMDE.prototype.clearAutosavedValue = function () {
-  if (isLocalStorageAvailable()) {
-    if (
-      this.options.autosave == undefined ||
-      this.options.autosave.uniqueId == undefined ||
-      this.options.autosave.uniqueId == ''
-    ) {
-      console.log(
-        'SimpleMDE: You must set a uniqueId to clear the autosave value'
-      )
-      return
-    }
-
-    localStorage.removeItem('smde_' + this.options.autosave.uniqueId)
-  } else {
-    console.log('SimpleMDE: localStorage not available, cannot autosave')
-  }
-}
-
-SimpleMDE.prototype.createSideBySide = function () {
-  var cm = this.codemirror
-  var wrapper = cm.getWrapperElement()
-  var preview = wrapper.nextSibling
-
-  if (!preview || !/editor-preview-side/.test(preview.className)) {
-    preview = document.createElement('div')
-    preview.className = 'editor-preview-side'
-    wrapper.parentNode.insertBefore(preview, wrapper.nextSibling)
-  }
-
-  // Syncs scroll  editor -> preview
-  var cScroll = false
-  var pScroll = false
-  cm.on('scroll', function (v) {
-    if (cScroll) {
-      cScroll = false
-      return
-    }
-    pScroll = true
-    var height = v.getScrollInfo().height - v.getScrollInfo().clientHeight
-    var ratio = parseFloat(v.getScrollInfo().top) / height
-    var move = (preview.scrollHeight - preview.clientHeight) * ratio
-    preview.scrollTop = move
-  })
-
-  // Syncs scroll  preview -> editor
-  preview.onscroll = function () {
-    if (pScroll) {
-      pScroll = false
-      return
-    }
-    cScroll = true
-    var height = preview.scrollHeight - preview.clientHeight
-    var ratio = parseFloat(preview.scrollTop) / height
-    var move =
-      (cm.getScrollInfo().height - cm.getScrollInfo().clientHeight) * ratio
-    cm.scrollTo(0, move)
-  }
-  return preview
-}
-
-SimpleMDE.prototype.createToolbar = function (items) {
+FunEditor.prototype.createToolbar = function (items) {
   items = items || this.options.toolbar
 
   if (!items || items.length === 0) {
@@ -1843,7 +1538,7 @@ SimpleMDE.prototype.createToolbar = function (items) {
     ;(function (item) {
       var el
       if (item === '|') {
-        el = createSep()
+        el = createSeparator()
       } else {
         el = createIcon(item, self.options.toolbarTips, self.options.shortcuts)
       }
@@ -1868,28 +1563,189 @@ SimpleMDE.prototype.createToolbar = function (items) {
 
   self.toolbarElements = toolbarData
 
-  var cm = this.codemirror
-  cm.on('cursorActivity', function () {
-    var stat = getState(cm)
+  // var cm = this.codemirror
+  // cm.on('cursorActivity', function () {
+  //   var stat = getState(cm)
 
-    for (var key in toolbarData) {
-      ;(function (key) {
-        var el = toolbarData[key]
-        if (stat[key]) {
-          el.className += ' active'
-        } else if (key != 'fullscreen' && key != 'side-by-side') {
-          el.className = el.className.replace(/\s*active\s*/g, '')
-        }
-      })(key)
-    }
-  })
+  //   for (var key in toolbarData) {
+  //     ;(function (key) {
+  //       var el = toolbarData[key]
+  //       if (stat[key]) {
+  //         el.className += ' active'
+  //       } else if (key != 'fullscreen' && key != 'side-by-side') {
+  //         el.className = el.className.replace(/\s*active\s*/g, '')
+  //       }
+  //     })(key)
+  //   }
+  // })
 
-  var cmWrapper = cm.getWrapperElement()
-  cmWrapper.parentNode.insertBefore(bar, cmWrapper)
+  this.view.dom.parentNode.insertBefore(bar, this.view.dom)
   return bar
 }
 
-SimpleMDE.prototype.createStatusbar = function (status) {
+/**
+ * Default markdown render.
+ */
+FunEditor.prototype.markdown = function (text) {
+  if (marked) {
+    // Initialize
+    var markedOptions = {}
+
+    // Update options
+    if (
+      this.options &&
+      this.options.renderingConfig &&
+      this.options.renderingConfig.singleLineBreaks === false
+    ) {
+      markedOptions.breaks = false
+    } else {
+      markedOptions.breaks = true
+    }
+
+    if (
+      this.options &&
+      this.options.renderingConfig &&
+      this.options.renderingConfig.codeSyntaxHighlighting === true &&
+      window.hljs
+    ) {
+      markedOptions.highlight = function (code) {
+        return window.hljs.highlightAuto(code).value
+      }
+    }
+
+    // Set options
+    marked.setOptions(markedOptions)
+
+    // Return
+    return marked(text)
+  }
+}
+
+
+// Safari, in Private Browsing Mode, looks like it supports localStorage but all calls to setItem throw QuotaExceededError. We're going to detect this and set a variable accordingly.
+function isLocalStorageAvailable() {
+	if(typeof localStorage === "object") {
+		try {
+			localStorage.setItem("smde_localStorage", 1);
+			localStorage.removeItem("smde_localStorage");
+		} catch(e) {
+			return false;
+		}
+	} else {
+		return false;
+	}
+
+	return true;
+}
+
+FunEditor.prototype.autosave = function() {
+	if(isLocalStorageAvailable()) {
+		var simplemde = this;
+
+		if(this.options.autosave.uniqueId == undefined || this.options.autosave.uniqueId == "") {
+			console.log("FunEditor: You must set a uniqueId to use the autosave feature");
+			return;
+		}
+
+		if(simplemde.element.form != null && simplemde.element.form != undefined) {
+			simplemde.element.form.addEventListener("submit", function() {
+				localStorage.removeItem("smde_" + simplemde.options.autosave.uniqueId);
+			});
+		}
+
+		if(this.options.autosave.loaded !== true) {
+			if(typeof localStorage.getItem("smde_" + this.options.autosave.uniqueId) == "string" && localStorage.getItem("smde_" + this.options.autosave.uniqueId) != "") {
+				this.codemirror.setValue(localStorage.getItem("smde_" + this.options.autosave.uniqueId));
+				this.options.autosave.foundSavedValue = true;
+			}
+
+			this.options.autosave.loaded = true;
+		}
+
+		localStorage.setItem("smde_" + this.options.autosave.uniqueId, simplemde.value());
+
+		var el = document.getElementById("autosaved");
+		if(el != null && el != undefined && el != "") {
+			var d = new Date();
+			var hh = d.getHours();
+			var m = d.getMinutes();
+			var dd = "am";
+			var h = hh;
+			if(h >= 12) {
+				h = hh - 12;
+				dd = "pm";
+			}
+			if(h == 0) {
+				h = 12;
+			}
+			m = m < 10 ? "0" + m : m;
+
+			el.innerHTML = "Autosaved: " + h + ":" + m + " " + dd;
+		}
+
+		this.autosaveTimeoutId = setTimeout(function() {
+			simplemde.autosave();
+		}, this.options.autosave.delay || 10000);
+	} else {
+		console.log("FunEditor: localStorage not available, cannot autosave");
+	}
+};
+
+FunEditor.prototype.clearAutosavedValue = function() {
+	if(isLocalStorageAvailable()) {
+		if(this.options.autosave == undefined || this.options.autosave.uniqueId == undefined || this.options.autosave.uniqueId == "") {
+			console.log("FunEditor: You must set a uniqueId to clear the autosave value");
+			return;
+		}
+
+		localStorage.removeItem("smde_" + this.options.autosave.uniqueId);
+	} else {
+		console.log("FunEditor: localStorage not available, cannot autosave");
+	}
+};
+
+FunEditor.prototype.createSideBySide = function() {
+	var cm = this.codemirror;
+	var wrapper = this.view.dom;
+	var preview = wrapper.nextSibling;
+
+	if(!preview || !/editor-preview-side/.test(preview.className)) {
+		preview = document.createElement("div");
+		preview.className = "editor-preview-side";
+		wrapper.parentNode.insertBefore(preview, wrapper.nextSibling);
+	}
+
+	// Syncs scroll  editor -> preview
+	var cScroll = false;
+	var pScroll = false;
+	wrapper.addEventListener('scroll', function(v) {
+		if(cScroll) {
+			cScroll = false;
+			return;
+		}
+		pScroll = true;
+		var height = v.getScrollInfo().height - v.getScrollInfo().clientHeight;
+		var ratio = parseFloat(v.getScrollInfo().top) / height;
+		var move = (preview.scrollHeight - preview.clientHeight) * ratio;
+		preview.scrollTop = move;
+	});
+
+	// Syncs scroll  preview -> editor
+	preview.onscroll = function() {
+		if(pScroll) {
+			pScroll = false;
+			return;
+		}
+		cScroll = true;
+		var height = preview.scrollHeight - preview.clientHeight;
+		var ratio = parseFloat(preview.scrollTop) / height;
+		var move = (cm.getScrollInfo().height - cm.getScrollInfo().clientHeight) * ratio;
+		cm.scrollTo(0, move);
+	};
+	return preview;
+};
+
+FunEditor.prototype.createStatusbar = function (status) {
   // Initialize
   status = status || this.options.status
   var options = this.options
@@ -2002,9 +1858,9 @@ SimpleMDE.prototype.createStatusbar = function (status) {
 /**
  * Get or set the text content.
  */
-SimpleMDE.prototype.value = function (val) {
+FunEditor.prototype.value = function (val) {
   if (val === undefined) {
-    return this.codemirror.getValue()
+    return this.view.state.doc.toString()
   } else {
     this.codemirror.getDoc().setValue(val)
     return this
@@ -2014,100 +1870,100 @@ SimpleMDE.prototype.value = function (val) {
 /**
  * Bind static methods for exports.
  */
-SimpleMDE.toggleBold = toggleBold
-SimpleMDE.toggleItalic = toggleItalic
-SimpleMDE.toggleStrikethrough = toggleStrikethrough
-SimpleMDE.toggleBlockquote = toggleBlockquote
-SimpleMDE.toggleHeadingSmaller = toggleHeadingSmaller
-SimpleMDE.toggleHeadingBigger = toggleHeadingBigger
-SimpleMDE.toggleHeading1 = toggleHeading1
-SimpleMDE.toggleHeading2 = toggleHeading2
-SimpleMDE.toggleHeading3 = toggleHeading3
-SimpleMDE.toggleCodeBlock = toggleCodeBlock
-SimpleMDE.toggleUnorderedList = toggleUnorderedList
-SimpleMDE.toggleOrderedList = toggleOrderedList
-SimpleMDE.cleanBlock = cleanBlock
-SimpleMDE.drawLink = drawLink
-SimpleMDE.drawImage = drawImage
-SimpleMDE.drawTable = drawTable
-SimpleMDE.drawHorizontalRule = drawHorizontalRule
-SimpleMDE.undo = undo
-SimpleMDE.redo = redo
-SimpleMDE.togglePreview = togglePreview
-SimpleMDE.toggleSideBySide = toggleSideBySide
-SimpleMDE.toggleFullScreen = toggleFullScreen
+FunEditor.toggleBold = toggleBold
+FunEditor.toggleItalic = toggleItalic
+FunEditor.toggleStrikethrough = toggleStrikethrough
+FunEditor.toggleBlockquote = toggleBlockquote
+FunEditor.toggleHeaderSmaller = toggleHeaderSmaller
+FunEditor.toggleHeaderBigger = toggleHeaderBigger
+FunEditor.toggleHeader1 = toggleHeader1
+FunEditor.toggleHeader2 = toggleHeader2
+FunEditor.toggleHeader3 = toggleHeader3
+FunEditor.toggleCodeBlock = toggleCodeBlock
+FunEditor.toggleUnorderedList = toggleUnorderedList
+FunEditor.toggleOrderedList = toggleOrderedList
+FunEditor.cleanBlock = cleanBlock
+FunEditor.drawLink = drawLink
+FunEditor.drawImage = drawImage
+FunEditor.drawTable = drawTable
+FunEditor.drawHorizontalRule = drawHorizontalRule
+FunEditor.undo = undo
+FunEditor.redo = redo
+FunEditor.togglePreview = togglePreview
+FunEditor.toggleSideBySide = toggleSideBySide
+FunEditor.toggleFullScreen = toggleFullScreen
 
 /**
  * Bind instance methods for exports.
  */
-SimpleMDE.prototype.toggleBold = function () {
+FunEditor.prototype.toggleBold = function () {
   toggleBold(this)
 }
-SimpleMDE.prototype.toggleItalic = function () {
+FunEditor.prototype.toggleItalic = function () {
   toggleItalic(this)
 }
-SimpleMDE.prototype.toggleStrikethrough = function () {
+FunEditor.prototype.toggleStrikethrough = function () {
   toggleStrikethrough(this)
 }
-SimpleMDE.prototype.toggleBlockquote = function () {
+FunEditor.prototype.toggleBlockquote = function () {
   toggleBlockquote(this)
 }
-SimpleMDE.prototype.toggleHeadingSmaller = function () {
-  toggleHeadingSmaller(this)
+FunEditor.prototype.toggleHeaderSmaller = function () {
+  toggleHeaderSmaller(this)
 }
-SimpleMDE.prototype.toggleHeadingBigger = function () {
-  toggleHeadingBigger(this)
+FunEditor.prototype.toggleHeaderBigger = function () {
+  toggleHeaderBigger(this)
 }
-SimpleMDE.prototype.toggleHeading1 = function () {
-  toggleHeading1(this)
+FunEditor.prototype.toggleHeader1 = function () {
+  toggleHeader1(this)
 }
-SimpleMDE.prototype.toggleHeading2 = function () {
-  toggleHeading2(this)
+FunEditor.prototype.toggleHeader2 = function () {
+  toggleHeader2(this)
 }
-SimpleMDE.prototype.toggleHeading3 = function () {
-  toggleHeading3(this)
+FunEditor.prototype.toggleHeader3 = function () {
+  toggleHeader3(this)
 }
-SimpleMDE.prototype.toggleCodeBlock = function () {
+FunEditor.prototype.toggleCodeBlock = function () {
   toggleCodeBlock(this)
 }
-SimpleMDE.prototype.toggleUnorderedList = function () {
+FunEditor.prototype.toggleUnorderedList = function () {
   toggleUnorderedList(this)
 }
-SimpleMDE.prototype.toggleOrderedList = function () {
+FunEditor.prototype.toggleOrderedList = function () {
   toggleOrderedList(this)
 }
-SimpleMDE.prototype.cleanBlock = function () {
+FunEditor.prototype.cleanBlock = function () {
   cleanBlock(this)
 }
-SimpleMDE.prototype.drawLink = function () {
+FunEditor.prototype.drawLink = function () {
   drawLink(this)
 }
-SimpleMDE.prototype.drawImage = function () {
+FunEditor.prototype.drawImage = function () {
   drawImage(this)
 }
-SimpleMDE.prototype.drawTable = function () {
+FunEditor.prototype.drawTable = function () {
   drawTable(this)
 }
-SimpleMDE.prototype.drawHorizontalRule = function () {
+FunEditor.prototype.drawHorizontalRule = function () {
   drawHorizontalRule(this)
 }
-SimpleMDE.prototype.undo = function () {
+FunEditor.prototype.undo = function () {
   undo(this)
 }
-SimpleMDE.prototype.redo = function () {
+FunEditor.prototype.redo = function () {
   redo(this)
 }
-SimpleMDE.prototype.togglePreview = function () {
+FunEditor.prototype.togglePreview = function () {
   togglePreview(this)
 }
-SimpleMDE.prototype.toggleSideBySide = function () {
+FunEditor.prototype.toggleSideBySide = function () {
   toggleSideBySide(this)
 }
-SimpleMDE.prototype.toggleFullScreen = function () {
+FunEditor.prototype.toggleFullScreen = function () {
   toggleFullScreen(this)
 }
 
-SimpleMDE.prototype.isPreviewActive = function () {
+FunEditor.prototype.isPreviewActive = function () {
   var cm = this.codemirror
   var wrapper = cm.getWrapperElement()
   var preview = wrapper.lastChild
@@ -2115,7 +1971,7 @@ SimpleMDE.prototype.isPreviewActive = function () {
   return /editor-preview-active/.test(preview.className)
 }
 
-SimpleMDE.prototype.isSideBySideActive = function () {
+FunEditor.prototype.isSideBySideActive = function () {
   var cm = this.codemirror
   var wrapper = cm.getWrapperElement()
   var preview = wrapper.nextSibling
@@ -2123,19 +1979,19 @@ SimpleMDE.prototype.isSideBySideActive = function () {
   return /editor-preview-active-side/.test(preview.className)
 }
 
-SimpleMDE.prototype.isFullscreenActive = function () {
+FunEditor.prototype.isFullscreenActive = function () {
   var cm = this.codemirror
 
   return cm.getOption('fullScreen')
 }
 
-SimpleMDE.prototype.getState = function () {
+FunEditor.prototype.getState = function () {
   var cm = this.codemirror
 
   return getState(cm)
 }
 
-SimpleMDE.prototype.toTextArea = function () {
+FunEditor.prototype.toTextArea = function () {
   var cm = this.codemirror
   var wrapper = cm.getWrapperElement()
 
@@ -2160,4 +2016,4 @@ SimpleMDE.prototype.toTextArea = function () {
   }
 }
 
-module.exports = SimpleMDE
+export default FunEditor
